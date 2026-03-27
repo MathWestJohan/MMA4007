@@ -48,16 +48,25 @@ test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False)
 # and vanilla RNN with a single layer. What is the accuracy of the model?
 
 class ActivityRecognitionRNN(nn.Module):
-  def __init__(self, input_size, hidden_size, output_size, num_layers=1):
+  def __init__(self, input_size, hidden_size, output_size, num_layers=1, model_type='RNN'):
     super(ActivityRecognitionRNN, self).__init__()
     self.hidden_size = hidden_size
     self.num_layers = num_layers
+    self.model_type = model_type
     
-    self.rnn = nn.RNN(input_size=input_size, 
-                          hidden_size=hidden_size, 
-                          num_layers=num_layers,
-                          batch_first=True
-    )
+    # Select RNN type
+    if model_type == 'RNN':
+        self.rnn = nn.RNN(input_size=input_size, hidden_size=hidden_size,
+                              num_layers=num_layers, batch_first=True)
+    elif model_type == 'GRU':
+        self.rnn = nn.GRU(input_size=input_size, hidden_size=hidden_size,
+                              num_layers=num_layers, batch_first=True)
+    elif model_type == 'LSTM':
+        self.rnn = nn.LSTM(input_size=input_size, hidden_size=hidden_size,
+                               num_layers=num_layers, batch_first=True)
+    else:
+        raise ValueError(f"Unknown model type: {model_type}")
+    
     self.fc = nn.Linear(hidden_size, output_size)  # Assuming 6 activity classes
     
   def forward(self, x):
@@ -113,33 +122,60 @@ def evaluate_model(model, test_loader, criterion, device):
       
   return total_loss / len(test_loader), 100. * correct / total
 
-# Training setup
+def run_experiment(model_type, input_size, hidden_size, num_layers, num_epochs, device):
+    """Run a single experiment and return final test accuracy"""
+    
+    model = ActivityRecognitionRNN(
+        input_size=input_size,
+        hidden_size=hidden_size,
+        output_size=6,
+        num_layers=num_layers,
+        model_type=model_type
+    ).to(device)
+    
+    criterion = nn.CrossEntropyLoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    
+    print(f"\n{'='*60}")
+    print(f"Training {model_type} | Layers: {num_layers} | Hidden: {hidden_size} | Features: {input_size}")
+    print(f"{'='*60}")
+    
+    for epoch in range(num_epochs):
+        train_loss, train_acc = train_model(model, train_loader, criterion, optimizer, device)
+        test_loss, test_acc = evaluate_model(model, test_loader, criterion, device)
+        
+        if (epoch + 1) % 20 == 0:
+            print(f"Epoch [{epoch+1:3d}/{num_epochs}] | "
+                  f"Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.2f}% | "
+                  f"Test Loss: {test_loss:.4f} | Test Acc: {test_acc:.2f}%")
+    
+    final_test_loss, final_test_acc = evaluate_model(model, test_loader, criterion, device)
+    print(f"Final Test Accuracy: {final_test_acc:.2f}%")
+    
+    return final_test_acc
+ 
+ 
+# Main experiments
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f"Using device: {device}")
-
-model = ActivityRecognitionRNN(
-    input_size=6,      # Last 6 features
-    hidden_size=128,
-    output_size=6,     # 6 activity classes
-    num_layers=1
-)
-model = model.to(device)
-
-criterion = nn.CrossEntropyLoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-
-print("\n" + "="*60)
-print("Training RNN model (1 layer, 6 features)")
-
-num_epochs = 50
-for epoch in range(num_epochs):
-  train_loss, train_acc = train_model(model, train_loader, criterion, optimizer, device)
-  test_loss, test_acc = evaluate_model(model, test_loader, criterion, device)
-  
-  if (epoch + 1) % 10 == 0:
-        print(f"Epoch [{epoch+1:3d}/{num_epochs}] | "
-              f"Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.2f}% | "
-              f"Test Loss: {test_loss:.4f} | Test Acc: {test_acc:.2f}%")
-        
-test_loss, test_acc = evaluate_model(model, test_loader, criterion, device)
-print(f"\nFinal Test Accuracy: {test_acc:.2f}%")
+ 
+results = {}
+ 
+# Experiment 1: Compare RNN vs GRU vs LSTM (1 layer, 128 hidden, 6 features)
+print("\n" + "="*70)
+print("EXPERIMENT: Comparing RNN, GRU, and LSTM (1 layer, 128 hidden units)")
+print("="*70)
+ 
+for model_type in ['RNN', 'GRU', 'LSTM']:
+    # Reset seed for fair comparison
+    torch.manual_seed(42)
+    acc = run_experiment(model_type, input_size=6, hidden_size=128, 
+                         num_layers=2, num_epochs=100, device=device)
+    results[f"{model_type}_1layer_128hidden"] = acc
+ 
+# Print summary
+print("\n" + "="*70)
+print("SUMMARY OF RESULTS")
+print("="*70)
+for name, acc in results.items():
+    print(f"{name}: {acc:.2f}%")
